@@ -21,7 +21,7 @@
          make_url/3,
          fix_path/1,
          pathencode/1,
-         normalize/1]).
+         normalize/1, normalize/2]).
 
 -include("hackney_lib.hrl").
 
@@ -61,9 +61,21 @@ parse_url(URL, S) ->
     end.
 
 %% @doc Normalizes the encoding of a Url
-normalize(Url) when is_list(Url) orelse is_binary(Url) ->
-    normalize(parse_url(Url));
-normalize(#hackney_url{}=Url) ->
+%% use the hackney_url:pathencode/1 to encode an url
+-spec normalize(URL) -> NormalizedUrl when
+      URL :: binary() | list() | hackney_url(),
+      NormalizedUrl :: hackney_url().
+normalize(Url) ->
+    normalize(Url, fun hackney_url:pathencode/1).
+
+%% @doc Normalizes the encoding of a Url
+-spec normalize(URL, Fun) -> NormalizedUrl when
+      URL :: binary() | list() | hackney_url(),
+      Fun :: fun(),
+      NormalizedUrl :: hackney_url().
+normalize(Url, Fun) when is_list(Url) orelse is_binary(Url) ->
+    normalize(parse_url(Url), Fun);
+normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
     #hackney_url{scheme=Scheme,
                  host = Host0,
                  port = Port,
@@ -89,7 +101,7 @@ normalize(#hackney_url{}=Url) ->
             end,
             {Host2, Netloc1}
     end,
-    Path1 = pathencode(Path),
+    Path1 = Fun(Path),
     Url#hackney_url{host=Host, netloc=Netloc, path=Path1}.
 
 transport_scheme(hackney_tcp_transport) ->
@@ -262,19 +274,21 @@ urlencode(Bin, Opts) ->
 
 -spec urlencode(binary(), binary(), boolean(), boolean()) -> binary().
 urlencode(<<C, Rest/binary>>, Acc, P=Plus, U=Upper) ->
-	if	C >= $0, C =< $9 -> urlencode(Rest, <<Acc/binary, C>>, P, U);
-		C >= $A, C =< $Z -> urlencode(Rest, <<Acc/binary, C>>, P, U);
-		C >= $a, C =< $z -> urlencode(Rest, <<Acc/binary, C>>, P, U);
-		C =:= $.; C =:= $-; C =:= $~; C =:= $_ ->
-		urlencode(Rest, <<Acc/binary, C>>, P, U);
-		C =:= $ , Plus ->
-		urlencode(Rest, <<Acc/binary, $+>>, P, U);
-		true ->
-		H = C band 16#F0 bsr 4, L = C band 16#0F,
-		H1 = if Upper -> tohexu(H); true -> tohexl(H) end,
-		L1 = if Upper -> tohexu(L); true -> tohexl(L) end,
-		urlencode(Rest, <<Acc/binary, $%, H1, L1>>, P, U)
-	end;
+    if	C >= $0, C =< $9 -> urlencode(Rest, <<Acc/binary, C>>, P, U);
+        C >= $A, C =< $Z -> urlencode(Rest, <<Acc/binary, C>>, P, U);
+        C >= $a, C =< $z -> urlencode(Rest, <<Acc/binary, C>>, P, U);
+        C =:= $.; C =:= $-; C =:= $~; C =:= $_; C =:= $*; C =:= $@ ->
+            urlencode(Rest, <<Acc/binary, C>>, P, U);
+        C =:= $(; C =:= $); C =:= $!, C =:= $$ ->
+            urlencode(Rest, <<Acc/binary, C>>, P, U);
+        C =:= $ , Plus ->
+            urlencode(Rest, <<Acc/binary, $+>>, P, U);
+        true ->
+            H = C band 16#F0 bsr 4, L = C band 16#0F,
+            H1 = if Upper -> tohexu(H); true -> tohexl(H) end,
+            L1 = if Upper -> tohexu(L); true -> tohexl(L) end,
+            urlencode(Rest, <<Acc/binary, $%, H1, L1>>, P, U)
+    end;
 urlencode(<<>>, Acc, _Plus, _Upper) ->
 	Acc.
 
